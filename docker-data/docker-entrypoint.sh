@@ -1,5 +1,4 @@
 #!/bin/sh
-
 if [ "$1" = 'redis-cluster' ]; then
     # Allow passing in cluster IP by argument or environmental variable
     IP="${2:-$IP}"
@@ -8,7 +7,13 @@ if [ "$1" = 'redis-cluster' ]; then
     if [ "$STANDALONE" = "true" ]; then
       max_port=7007
     fi
-
+    masterauth=""
+    requirepass=""
+    if [ -n "$PASSWORD" ]; then
+      masterauth="masterauth $PASSWORD"
+      requirepass="requirepass $PASSWORD"
+    fi
+    echo "requirepass:${requirepass}"
     for port in `seq 7000 $max_port`; do
       mkdir -p /redis-conf/${port}
       mkdir -p /redis-data/${port}
@@ -18,9 +23,9 @@ if [ "$1" = 'redis-cluster' ]; then
       fi
 
       if [ "$port" -lt "7006" ]; then
-        PORT=${port} envsubst < /redis-conf/redis-cluster.tmpl > /redis-conf/${port}/redis.conf
+        PORT=${port} MASTERAUTH=${masterauth} REQUIREPASS=${requirepass} envsubst < /redis-conf/redis-cluster.tmpl > /redis-conf/${port}/redis.conf
       else
-        PORT=${port} envsubst < /redis-conf/redis.tmpl > /redis-conf/${port}/redis.conf
+        PORT=${port} REQUIREPASS=${requirepass} envsubst < /redis-conf/redis.tmpl > /redis-conf/${port}/redis.conf
       fi
 
       if [ "$port" -lt "7003" ]; then
@@ -46,11 +51,19 @@ if [ "$1" = 'redis-cluster' ]; then
 
     if [ $? -eq 0 ]
     then
+      clientpath=$(find / -path '*redis/client.rb')
+      if [ -n "$clientpath" ] && [ -n "$PASSWORD" ]; then
+        sed -i "s/:password =>.*,/:password => \"${PASSWORD}\",/" $clientpath
+      fi
       echo "Using old redis-trib.rb to create the cluster"
       echo "yes" | ruby /redis/src/redis-trib.rb create --replicas 1 ${IP}:7000 ${IP}:7001 ${IP}:7002 ${IP}:7003 ${IP}:7004 ${IP}:7005
     else
       echo "Using redis-cli to create the cluster"
-      echo "yes" | /redis/src/redis-cli --cluster create --cluster-replicas 1 ${IP}:7000 ${IP}:7001 ${IP}:7002 ${IP}:7003 ${IP}:7004 ${IP}:7005
+      if [ -n "$PASSWORD" ]; then
+        echo "yes" | /redis/src/redis-cli -a "${PASSWORD}" --cluster create --cluster-replicas 1 ${IP}:7000 ${IP}:7001 ${IP}:7002 ${IP}:7003 ${IP}:7004 ${IP}:7005
+      else
+        echo "yes" | /redis/src/redis-cli --cluster create --cluster-replicas 1 ${IP}:7000 ${IP}:7001 ${IP}:7002 ${IP}:7003 ${IP}:7004 ${IP}:7005
+      fi
     fi
 
 
